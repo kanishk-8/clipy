@@ -1,0 +1,12 @@
+{
+    "id": "clipy",
+    "name": "Clipy",
+    "description": "A clean, responsive clipboard manager for DankMaterialShell inspired by Anime List design.",
+    "version": "1.0.0",
+    "author": "Antigravity",
+    "icon": "content_paste",
+    "type": "widget",
+    "component": "./Widget.qml",
+    "settings": "./Settings.qml",
+    "permissions": ["settings_read", "settings_write"]
+}
