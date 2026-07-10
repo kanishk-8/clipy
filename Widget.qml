@@ -36,7 +36,7 @@ PluginComponent {
     property var imageCache: ({})
     property bool wtypeAvailable: false
     property bool confirmClearVisible: false
-    property int selectedIndex: 0
+    property int selectedClipIndex: 0
     property bool autoPasteAfterNextCopy: false
 
     // Models for 2-column reactive rendering
@@ -55,6 +55,14 @@ PluginComponent {
             }
             return true;
         });
+    }
+
+    onFilteredItemsChanged: {
+        root.selectedClipIndex = 0;
+    }
+
+    onSelectedClipIndexChanged: {
+        console.warn("[Clipy Debug] selectedClipIndex changed to:", selectedClipIndex);
     }
 
     property var col1Model: {
@@ -118,13 +126,71 @@ PluginComponent {
             detailsText: ""
             showCloseButton: false
 
+            onVisibleChanged: {
+                if (visible) {
+                    focusTimer.restart();
+                }
+            }
+
             Item {
+                id: mainPopoutItem
                 width: parent.width
                 implicitHeight: root.popoutHeightSetting
+                focus: true
 
                 Component.onCompleted: {
                     root.confirmClearVisible = false;
                     root.loadHistory();
+                }
+
+                Timer {
+                    id: debugTickTimer
+                    interval: 1000
+                    running: true
+                    repeat: true
+                    onTriggered: {
+                        console.warn("[Clipy Debug] timer tick - selectedClipIndex:", root.selectedClipIndex, "filteredItems length:", root.filteredItems.length, "searchBar active:", globalSearchField.activeFocus);
+                    }
+                }
+
+                Timer {
+                    id: focusTimer
+                    interval: 100
+                    running: true
+                    repeat: false
+                    onTriggered: {
+                        if (Window.window) {
+                            Window.window.requestActivate();
+                        }
+                        mainPopoutItem.forceActiveFocus();
+                    }
+                }
+
+                Keys.onPressed: event => {
+                    console.warn("[Clipy Debug] mainPopoutItem Key pressed - key:", event.key, "text:", event.text);
+                    if (!globalSearchField.activeFocus) {
+                        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (root.filteredItems.length > 0 && root.selectedClipIndex >= 0 && root.selectedClipIndex < root.filteredItems.length) {
+                                var selectedItem = root.filteredItems[root.selectedClipIndex];
+                                if (selectedItem) {
+                                    root.copyItem(selectedItem.id, selectedItem.mime, selectedItem.isImage, selectedItem.preview);
+                                    root.closePopout();
+                                    event.accepted = true;
+                                }
+                            }
+                        } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                            root.navigateItems(true);
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab) {
+                            root.navigateItems(false);
+                            event.accepted = true;
+                        } else if (event.text !== "" && !/[\x00-\x1F\x7F-\x9F]/.test(event.text)) {
+                            globalSearchField.forceActiveFocus();
+                            globalSearchField.text += event.text;
+                            globalSearchField.cursorPosition = globalSearchField.text.length;
+                            event.accepted = true;
+                        }
+                    }
                 }
 
                 ColumnLayout {
@@ -235,12 +301,19 @@ PluginComponent {
                                 color: Theme.surfaceText
                                 font.pixelSize: Theme.fontSizeMedium
 
-                                focus: true
-                                Component.onCompleted: forceActiveFocus()
-
                                 onTextChanged: {
                                     root.searchText = text;
-                                    root.selectedIndex = 0;
+                                    root.selectedClipIndex = 0;
+                                }
+
+                                onAccepted: {
+                                    if (root.filteredItems.length > 0 && root.selectedClipIndex >= 0 && root.selectedClipIndex < root.filteredItems.length) {
+                                        var selectedItem = root.filteredItems[root.selectedClipIndex];
+                                        if (selectedItem) {
+                                            root.copyItem(selectedItem.id, selectedItem.mime, selectedItem.isImage, selectedItem.preview);
+                                            root.closePopout();
+                                        }
+                                    }
                                 }
 
                                 StyledText {
@@ -261,24 +334,29 @@ PluginComponent {
 
                                 Keys.onTabPressed: event => {
                                     root.navigateItems(true);
+                                    mainPopoutItem.forceActiveFocus();
                                     event.accepted = true;
                                 }
 
                                 Keys.onBacktabPressed: event => {
                                     root.navigateItems(false);
+                                    mainPopoutItem.forceActiveFocus();
                                     event.accepted = true;
                                 }
 
                                 Keys.onPressed: event => {
+                                    console.warn("[Clipy Debug] globalSearchField Key pressed - key:", event.key, "text:", event.text);
                                     if (event.key === Qt.Key_Down) {
                                         root.navigateItems(true);
+                                        mainPopoutItem.forceActiveFocus();
                                         event.accepted = true;
                                     } else if (event.key === Qt.Key_Up) {
                                         root.navigateItems(false);
+                                        mainPopoutItem.forceActiveFocus();
                                         event.accepted = true;
                                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                        if (root.filteredItems.length > 0 && root.selectedIndex >= 0 && root.selectedIndex < root.filteredItems.length) {
-                                            var selectedItem = root.filteredItems[root.selectedIndex];
+                                        if (root.filteredItems.length > 0 && root.selectedClipIndex >= 0 && root.selectedClipIndex < root.filteredItems.length) {
+                                            var selectedItem = root.filteredItems[root.selectedClipIndex];
                                             if (selectedItem) {
                                                 root.copyItem(selectedItem.id, selectedItem.mime, selectedItem.isImage, selectedItem.preview);
                                                 root.closePopout();
@@ -329,7 +407,7 @@ PluginComponent {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             root.activeTab = modelData;
-                                            root.selectedIndex = 0;
+                                            root.selectedClipIndex = 0;
                                         }
                                     }
                                 }
@@ -352,9 +430,21 @@ PluginComponent {
                             clip: true
                             boundsBehavior: Flickable.StopAtBounds
 
+                            ScrollBar.vertical: ScrollBar {
+                                id: verticalScrollBar
+                                policy: ScrollBar.AlwaysOn
+                                active: true
+                                contentItem: Rectangle {
+                                    implicitWidth: 6
+                                    radius: 3
+                                    color: Theme.primary
+                                    opacity: verticalScrollBar.active ? 0.8 : 0.4
+                                }
+                            }
+
                             Row {
                                 id: columnsRow
-                                width: flickable.width
+                                width: flickable.width - 12
                                 spacing: Theme.spacingM
 
                                 readonly property int columnsCount: root.popoutWidthSetting > 480 ? 2 : 1
@@ -374,7 +464,7 @@ PluginComponent {
                                             pluginApi: root
                                             enableVariableHeight: root.enableVariableHeight
                                             absoluteIndex: columnsRow.columnsCount === 2 ? index * 2 : index
-                                            selected: absoluteIndex === root.selectedIndex
+                                            selected: (columnsRow.columnsCount === 2 ? index * 2 : index) === root.selectedClipIndex
                                             onClicked: {
                                                 root.copyItem(clipboardId, mime, isImage, preview);
                                                 root.closePopout();
@@ -401,7 +491,7 @@ PluginComponent {
                                             pluginApi: root
                                             enableVariableHeight: root.enableVariableHeight
                                             absoluteIndex: index * 2 + 1
-                                            selected: absoluteIndex === root.selectedIndex
+                                            selected: (index * 2 + 1) === root.selectedClipIndex
                                             onClicked: {
                                                 root.copyItem(clipboardId, mime, isImage, preview);
                                                 root.closePopout();
@@ -441,14 +531,14 @@ PluginComponent {
             var step = forward ? 1 : -1;
             var nextIdx = (currentIdx + step + root.categories.length) % root.categories.length;
             root.activeTab = root.categories[nextIdx];
-            root.selectedIndex = 0;
+            root.selectedClipIndex = 0;
         }
     }
 
     function navigateItems(forward) {
         if (root.filteredItems.length > 0) {
             var step = forward ? 1 : -1;
-            root.selectedIndex = (root.selectedIndex + step + root.filteredItems.length) % root.filteredItems.length;
+            root.selectedClipIndex = (root.selectedClipIndex + step + root.filteredItems.length) % root.filteredItems.length;
         }
     }
 
@@ -463,7 +553,7 @@ PluginComponent {
                 } else {
                     root.items = [];
                 }
-                root.selectedIndex = 0;
+                root.selectedClipIndex = 0;
                 root.loading = false;
             });
         } else {
@@ -634,7 +724,7 @@ PluginComponent {
             } else {
                 root.items = [];
             }
-            root.selectedIndex = 0;
+            root.selectedClipIndex = 0;
             root.loading = false;
         }
     }
@@ -710,6 +800,7 @@ PluginComponent {
             }
         }
     }
+
 
     Process {
         id: autoPasteProc
